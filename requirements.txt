@@ -1,0 +1,38 @@
+﻿# Anaconda可以直接`pip install -r requirements.txt`，一键安装依赖库。
+# Web应用框架
+flask==2.0.1
+flask-cors==3.0.10
+
+# 环境变量管理
+python-dotenv==1.0.0
+
+# HTTP请求
+requests==2.26.0
+certifi==2025.1.31
+
+# 文件处理
+PyPDF2==2.10.5
+python-docx==0.8.11
+PyMuPDF==1.20.2  # 修改为兼容版本
+pandas==1.4.4    # 添加pandas支持Excel文件处理
+tabulate==0.9.0  # 添加表格格式化支持
+xlrd==2.0.1      # 添加xlrd支持.xls文件读取
+openpyxl==3.0.10 # 添加openpyxl支持.xlsx文件读取
+
+# 图像处理
+Pillow==11.1.0
+numpy==1.22.0 # 兼容PaddlePaddle和OpenCV的版本
+opencv-python==4.6.0.66
+
+# OCR引擎
+paddlepaddle==3.0.0
+paddleocr==2.7.0
+
+# 其他工具
+Werkzeug==2.0.1
+packaging==23.2
+flask-sqlalchemy==3.1.1
+openai==1.75.0
+
+# 日志和错误处理
+python-json-logger==2.0.4
