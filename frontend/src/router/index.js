@@ -33,7 +33,7 @@ const routes = [
     component: Sidebar,
     meta: { requiresAuth: true },//标记该组件需要登录才能记录
     children: [//定义子路由，服务于侧边栏的组件跳转
-      { path: 'receivable', component: Receivable },
+      { path: 'receivable', component: Receivable},
       { path: 'payable', component: Payable },
       { path: 'voucher', component: Voucher },
       { path: 'ledger', component: Ledger },
