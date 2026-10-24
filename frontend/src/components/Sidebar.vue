@@ -30,6 +30,7 @@
 <script setup>
 import { useRouter, useRoute } from 'vue-router'
 import { ref, watch, computed } from 'vue'
+import { clearSession, getUser } from '../api'
 
 const router = useRouter()
 const route = useRoute()//获取当前页面路由信息 → 拿地址、参数、路径
@@ -38,21 +39,28 @@ const activePath = ref('')
 
 // 性能优化：菜单数据无需响应式 → markRaw
 const menuList = [
-  { title: '应收管理', path: '/home/receivable', group: '财务模块' },
-  { title: '应付管理', path: '/home/payable', group: '财务模块' },
+  { title: '应收管理', path: '/home/receivable', group: '财务模块', financeOnly: true },
+  { title: '应付管理', path: '/home/payable', group: '财务模块', financeOnly: true },
   { title: '费用报销', path: '/home/reimburse', group: '财务模块' },
-  { title: '凭证生成', path: '/home/voucher', group: '财务模块' },
-  { title: '总账记账', path: '/home/ledger', group: '财务模块' },
-  { title: '财务报表', path: '/home/report', group: '财务模块' },
-  { title: '发票OCR识别', path: '/home/invoice-ocr', group: '智能审查' },
-  { title: '文档分析', path: '/home/doc-analysis', group: '智能审查' },
-  { title: '发票审核', path: '/home/invoice-audit', group: '智能审查' },
+  { title: '凭证生成', path: '/home/voucher', group: '财务模块', financeOnly: true },
+  { title: '总账记账', path: '/home/ledger', group: '财务模块', financeOnly: true },
+  { title: '预算管理', path: '/home/budget', group: '财务模块', financeOnly: true },
+  { title: '财务报表', path: '/home/report', group: '财务模块', financeOnly: true },
+  { title: '发票上传', path: '/home/invoice-ocr', group: '智能审查' },
+  { title: '发票台账', path: '/home/invoice-audit', group: '智能审查' },
+  { title: '审查归档', path: '/home/audit-archive', group: '智能审查' },
 ]
+
+// 按角色显隐（T12e/T16）：带 financeOnly 的菜单仅财务可见
+const visibleMenu = computed(() => {
+  const role = getUser()?.role
+  return menuList.filter(item => !item.financeOnly || role === 'finance')
+})
 
 // 按分组归类菜单
 const groupedMenu = computed(() => {
   const groups = {}
-  menuList.forEach(item => {
+  visibleMenu.value.forEach(item => {
     if (!groups[item.group]) {
       groups[item.group] = []
     }
@@ -75,7 +83,7 @@ const go = (path) => {
 }
 
 const logout = () => {
-  localStorage.removeItem('erp-user')
+  clearSession()
   router.push('/login')
 }
 </script>

@@ -2,13 +2,17 @@
   <div class="page">
     <h3>总账记账</h3>
     <div class="content">
+      <div class="empty" v-if="!isFinance">仅财务角色可访问总账记账</div>
+
+      <template v-else>
       <div class="toolbar">
-        <span class="period-label">当前期间：2024年5月</span>
-        <button class="btn primary" @click="refreshLedger">刷新科目余额</button>
+        <button class="btn primary" @click="loadLedger" :disabled="loading">
+          {{ loading ? '加载中...' : '刷新科目余额' }}
+        </button>
       </div>
 
-      <!-- 科目余额表 -->
-      <table class="ledger-table" v-if="financeStore.ledgerAccounts.length > 0">
+      <!-- 科目余额表（后端 /api/vouchers/ledger） -->
+      <table class="ledger-table" v-if="accounts.length > 0">
         <thead>
           <tr>
             <th>科目编码</th>
@@ -20,56 +24,59 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="account in financeStore.ledgerAccounts" :key="account.code">
-            <td>{{ account.code }}</td>
-            <td>{{ account.name }}</td>
-            <td>¥{{ account.opening.toFixed(2) }}</td>
-            <td class="debit">¥{{ account.debit.toFixed(2) }}</td>
-            <td class="credit">¥{{ account.credit.toFixed(2) }}</td>
-            <td class="closing">¥{{ account.closing.toFixed(2) }}</td>
+          <tr v-for="account in accounts" :key="account.account_code">
+            <td>{{ account.account_code }}</td>
+            <td>{{ account.account_name }}</td>
+            <td>¥{{ fmt(account.opening) }}</td>
+            <td class="debit">¥{{ fmt(account.debit) }}</td>
+            <td class="credit">¥{{ fmt(account.credit) }}</td>
+            <td class="closing">¥{{ fmt(account.closing) }}</td>
           </tr>
         </tbody>
         <tfoot>
           <tr>
             <td colspan="2">合计</td>
-            <td>¥{{ totalOpening.toFixed(2) }}</td>
-            <td class="debit">¥{{ totalDebit.toFixed(2) }}</td>
-            <td class="credit">¥{{ totalCredit.toFixed(2) }}</td>
-            <td class="closing">¥{{ totalClosing.toFixed(2) }}</td>
+            <td>¥{{ fmt(totalOpening) }}</td>
+            <td class="debit">¥{{ fmt(totalDebit) }}</td>
+            <td class="credit">¥{{ fmt(totalCredit) }}</td>
+            <td class="closing">¥{{ fmt(totalClosing) }}</td>
           </tr>
         </tfoot>
       </table>
-      <div class="empty" v-else>暂无科目数据</div>
+      <div class="empty" v-else-if="!loading">暂无科目数据</div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useFinanceStore } from '../../stores/finance'
+import { ref, computed, onMounted } from 'vue'
+import { request, getUser } from '../../api'
 
-const financeStore = useFinanceStore()
+const accounts = ref([])
+const loading = ref(false)
 
-const totalOpening = computed(() => {
-  //reduce = 把数组里所有数，一步步加起来（或计算），最后返回一个总数
-  return financeStore.ledgerAccounts.reduce((sum, a) => sum + a.opening, 0)
-})
+const isFinance = getUser()?.role === 'finance'
 
-const totalDebit = computed(() => {
-  return financeStore.ledgerAccounts.reduce((sum, a) => sum + a.debit, 0)
-})
-
-const totalCredit = computed(() => {
-  return financeStore.ledgerAccounts.reduce((sum, a) => sum + a.credit, 0)
-})
-
-const totalClosing = computed(() => {
-  return financeStore.ledgerAccounts.reduce((sum, a) => sum + a.closing, 0)
-})
-
-const refreshLedger = () => {
-  alert('科目余额已刷新！')
+const loadLedger = async () => {
+  loading.value = true
+  try {
+    accounts.value = await request('/api/vouchers/ledger')
+  } catch (e) {
+    alert(e.message)
+  } finally {
+    loading.value = false
+  }
 }
+
+const fmt = (v) => Number(v || 0).toFixed(2)
+
+const totalOpening = computed(() => accounts.value.reduce((sum, a) => sum + Number(a.opening || 0), 0))
+const totalDebit = computed(() => accounts.value.reduce((sum, a) => sum + Number(a.debit || 0), 0))
+const totalCredit = computed(() => accounts.value.reduce((sum, a) => sum + Number(a.credit || 0), 0))
+const totalClosing = computed(() => accounts.value.reduce((sum, a) => sum + Number(a.closing || 0), 0))
+
+onMounted(loadLedger)
 </script>
 
 <style scoped>
@@ -85,16 +92,7 @@ const refreshLedger = () => {
 }
 
 .toolbar {
-  display: flex;
-  gap: 12px;
   margin-bottom: 20px;
-  align-items: center;
-}
-
-.period-label {
-  font-size: 16px;
-  color: #333;
-  font-weight: 500;
 }
 
 .btn {
@@ -107,6 +105,11 @@ const refreshLedger = () => {
 .btn.primary {
   background: #409eff;
   color: white;
+}
+
+.btn:disabled {
+  background: #c0c4cc;
+  cursor: not-allowed;
 }
 
 .ledger-table {
@@ -126,21 +129,21 @@ const refreshLedger = () => {
   background: #f5f7fa;
 }
 
-.ledger-table tfoot {
-  background: #f5f7fa;
-  font-weight: bold;
+.ledger-table tfoot td {
+  font-weight: 600;
+  background: #fafafa;
 }
 
-.debit {
-  color: #f56c6c;
+.ledger-table .debit {
+  color: #409eff;
 }
 
-.credit {
-  color: #67c23a;
+.ledger-table .credit {
+  color: #e6a23c;
 }
 
-.closing {
-  font-weight: bold;
+.ledger-table .closing {
+  font-weight: 600;
 }
 
 .empty {

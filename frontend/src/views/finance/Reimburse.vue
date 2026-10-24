@@ -3,30 +3,23 @@
     <h3>费用报销</h3>
     <div class="content">
       <div class="reimburse-tabs">
-        <div 
-          class="tab-item" 
-          :class="{ active: activeTab === 'all' }"
-          @click="activeTab = 'all'"
-        >全部报销单</div>
-        <div 
-          class="tab-item" 
-          :class="{ active: activeTab === 'pending' }"
-          @click="activeTab = 'pending'"
-        >待审批</div>
-        <div 
-          class="tab-item" 
-          :class="{ active: activeTab === 'done' }"
-          @click="activeTab = 'done'"
-        >已审批</div>
+        <div class="tab-item" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">全部报销单</div>
+        <div class="tab-item" :class="{ active: activeTab === 'pending' }" @click="activeTab = 'pending'">待财务审批</div>
+        <div class="tab-item" :class="{ active: activeTab === 'done' }" @click="activeTab = 'done'">已审批</div>
       </div>
 
-      <!-- 新增报销单对话框 -->
-      <div class="dialog-overlay" v-if="showDialog" @click.self="showDialog = false"><!--遮罩（表单（按钮））-->>
+      <!-- 新增报销单：从已通过的发票创建 -->
+      <div class="dialog-overlay" v-if="showDialog" @click.self="showDialog = false">
         <div class="dialog">
-          <h4>新增报销单</h4>
+          <h4>从已通过的发票创建报销单</h4>
           <div class="form-group">
-            <label>报销人：</label>
-            <input v-model="newReimburse.employee" placeholder="请输入报销人" />
+            <label>选择发票（仅 AI 审查通过的发票，金额自动取价税合计）：</label>
+            <select v-model="newReimburse.invoice_id">
+              <option value="">请选择</option>
+              <option v-for="inv in approvedInvoices" :key="inv.id" :value="inv.id">
+                {{ inv.invoice_no }} - ¥{{ Number(inv.amount).toFixed(2) }}
+              </option>
+            </select>
           </div>
           <div class="form-group">
             <label>报销类型：</label>
@@ -39,16 +32,28 @@
             </select>
           </div>
           <div class="form-group">
-            <label>报销金额：</label>
-            <input v-model.number="newReimburse.amount" type="number" placeholder="请输入金额" />
-          </div>
-          <div class="form-group">
             <label>报销说明：</label>
-            <textarea v-model="newReimburse.desc" placeholder="请输入报销说明"></textarea>
+            <textarea v-model="newReimburse.description" placeholder="请输入报销说明"></textarea>
           </div>
           <div class="dialog-btns">
             <button class="btn cancel" @click="showDialog = false">取消</button>
-            <button class="btn confirm" @click="submitReimburse">提交</button>
+            <button class="btn confirm" @click="submitReimburse" :disabled="submitting">
+              {{ submitting ? '提交中...' : '提交' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI 意见对话框 -->
+      <div class="dialog-overlay" v-if="aiOpinion" @click.self="aiOpinion = null">
+        <div class="dialog wide">
+          <h4>
+            财务审批参考 - 发票 AI 审查意见
+            <span class="status" :class="statusClass(aiOpinion.result)">{{ aiOpinion.result }}</span>
+          </h4>
+          <div class="markdown-content" v-html="renderMarkdown(aiOpinion.content_md)"></div>
+          <div class="dialog-btns">
+            <button class="btn confirm" @click="aiOpinion = null">知道了</button>
           </div>
         </div>
       </div>
@@ -67,107 +72,115 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in filteredList" :key="item.id"><!--每一行都有一个id-->
-              <td>{{ item.id }}</td>
+            <tr v-for="item in filteredList" :key="item.id">
+              <td>{{ item.code }}</td>
               <td>{{ item.employee }}</td>
               <td>{{ item.type }}</td>
-              <td>¥{{ item.amount.toFixed(2) }}</td>
+              <td>¥{{ Number(item.amount).toFixed(2) }}</td>
+              <td><span class="status" :class="statusClass(item.status)">{{ item.status }}</span></td>
               <td>
-                <span class="status" :class="item.status">
-                  {{ statusMap[item.status] }}
-                </span>
-              </td>
-              <td>
-                <button 
-                  v-if="item.status === 'pending' && activeTab === 'pending'" 
-                  class="btn-sm approve"
-                  @click="approveReimburse(item.id)"
-                >审核通过</button>
-                <button 
-                  v-if="item.status === 'pending' && activeTab === 'pending'" 
-                  class="btn-sm reject"
-                  @click="rejectReimburse(item.id)"
-                >驳回</button>
+                <template v-if="isFinance && item.status === '待财务审批'">
+                  <button class="btn-sm approve" @click="settle(item.id, 'approve')">审核通过</button>
+                  <button class="btn-sm reject" @click="settle(item.id, 'reject')">驳回</button>
+                </template>
                 <span v-else>-</span>
               </td>
             </tr>
           </tbody>
         </table>
         <div class="empty" v-else>暂无报销单据</div>
-        <button class="add-btn" @click="showDialog = true">+</button>
+        <button class="add-btn" @click="openDialog">+</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { useFinanceStore } from '../../stores/finance'
+import { ref, computed, onMounted } from 'vue'
+import { request, getUser } from '../../api'
+import { renderMarkdown } from '../../markdown'
 
 const activeTab = ref('all')
 const showDialog = ref(false)
-const newReimburse = ref({
-  employee: '张三',
-  type: '差旅费',
-  amount: 1300,
-  desc: '2024年5月出差北京，交通费500元，住宿费800元'
-})
+const submitting = ref(false)
+const list = ref([])              // 报销单列表（后端）
+const approvedInvoices = ref([])  // 已通过发票（创建时选择）
+const aiOpinion = ref(null)       // 审批响应里的 AI 意见
+const newReimburse = ref({ invoice_id: '', type: '差旅费', description: '' })
 
-const financeStore = useFinanceStore()//全局共享状态
-const statusMap = {
-  pending: '待审核',
-  approved: '已通过',
-  rejected: '已驳回'
-}
+// 财务角色才显示审批按钮
+const isFinance = getUser()?.role === 'finance'
 
-//计算属性
 const filteredList = computed(() => {
-  if (activeTab.value === 'all') {
-    return financeStore.reimburseList
-  } else if (activeTab.value === 'pending') {
-    return financeStore.reimburseList.filter(item => item.status === 'pending')
-  } else {
-    return financeStore.reimburseList.filter(item => item.status === 'approved' || item.status === 'rejected')
+  if (activeTab.value === 'all') return list.value
+  if (activeTab.value === 'pending') {
+    return list.value.filter(item => item.status === '待财务审批')
   }
+  return list.value.filter(item => item.status !== '待财务审批')
 })
 
-const submitReimburse = () => {
-  // 1. 生成唯一报销单号：BX20240501、BX20240502…
-  const id = 'BX202405' + String(financeStore.reimburseList.length + 1).padStart(2, '0')
-
-  // 2. 把表单数据 push 到报销列表里
-  financeStore.reimburseList.push({
-    id,               // 单号
-    employee: newReimburse.value.employee, // 报销人
-    type: newReimburse.value.type,        // 类型
-    amount: newReimburse.value.amount,    // 金额
-    desc: newReimburse.value.desc,        // 描述
-    status: 'pending', // 状态：待审核
-    date: new Date().toISOString().split('T')[0] // 今天日期
-  })
-
-  // 3. 关闭弹窗
-  showDialog.value = false
-
-  // 4. 提示成功
-  alert('报销单提交成功！单号：' + id)
-}
-
-const approveReimburse = (id) => {
-  const item = financeStore.reimburseList.find(i => i.id === id)
-  if (item) {
-    item.status = 'approved'
-    alert('报销单 ' + id + ' 已审核通过！可生成凭证。')
+const loadList = async () => {
+  try {
+    list.value = await request('/api/reimburse')
+  } catch (e) {
+    alert(e.message)
   }
 }
 
-const rejectReimburse = (id) => {
-  const item = financeStore.reimburseList.find(i => i.id === id)
-  if (item) {
-    item.status = 'rejected'
-    alert('报销单 ' + id + ' 已驳回！')
+const openDialog = async () => {
+  newReimburse.value = { invoice_id: '', type: '差旅费', description: '' }
+  showDialog.value = true
+  try {
+    // 拉取可报销发票：仅 AI 审查已通过
+    approvedInvoices.value = await request('/api/invoices?status=' + encodeURIComponent('已通过'))
+  } catch (e) {
+    alert(e.message)
   }
 }
+
+const submitReimburse = async () => {
+  if (!newReimburse.value.invoice_id) {
+    alert('请选择发票')
+    return
+  }
+  submitting.value = true
+  try {
+    const created = await request('/api/reimburse', {
+      method: 'POST',
+      body: {
+        invoice_id: newReimburse.value.invoice_id,
+        type: newReimburse.value.type,
+        description: newReimburse.value.description,
+      },
+    })
+    showDialog.value = false
+    alert('报销单提交成功！单号：' + created.code)
+    await loadList()
+  } catch (e) {
+    alert(e.message)
+  } finally {
+    submitting.value = false
+  }
+}
+
+// 财务审批：通过/驳回，成功后展示发票 AI 意见
+const settle = async (id, action) => {
+  try {
+    const data = await request(`/api/reimburse/${id}/${action}`, { method: 'POST' })
+    aiOpinion.value = data.ai_opinion
+    await loadList()
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+const statusClass = (status) => ({
+  '已通过': 'st-ok',
+  '待财务审批': 'st-warn',
+  '已驳回': 'st-bad',
+}[status] || 'st-gray')
+
+onMounted(loadList)
 </script>
 
 <style scoped>
@@ -234,22 +247,13 @@ const rejectReimburse = (id) => {
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
+  white-space: nowrap;
 }
 
-.status.pending {
-  background: #fdf6ec;
-  color: #e6a23c;
-}
-
-.status.approved {
-  background: #f0f9eb;
-  color: #67c23a;
-}
-
-.status.rejected {
-  background: #fef0f0;
-  color: #f56c6c;
-}
+.st-ok { background: #f0f9eb; color: #67c23a; }
+.st-warn { background: #fdf6ec; color: #e6a23c; }
+.st-bad { background: #fef0f0; color: #f56c6c; }
+.st-gray { background: #f4f4f5; color: #909399; }
 
 .empty {
   text-align: center;
@@ -289,12 +293,21 @@ const rejectReimburse = (id) => {
   background: white;
   padding: 24px;
   border-radius: 8px;
-  width: 400px;
+  width: 420px;
   max-width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.dialog.wide {
+  width: 560px;
 }
 
 .dialog h4 {
   margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .form-group {
@@ -336,6 +349,11 @@ const rejectReimburse = (id) => {
   cursor: pointer;
 }
 
+.btn:disabled {
+  background: #c0c4cc;
+  cursor: not-allowed;
+}
+
 .btn.cancel {
   background: #f5f7fa;
   color: #333;
@@ -363,5 +381,17 @@ const rejectReimburse = (id) => {
 .btn-sm.reject {
   background: #f56c6c;
   color: white;
+}
+
+.markdown-content {
+  font-size: 14px;
+  color: #333;
+  line-height: 1.7;
+}
+
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4) {
+  margin: 8px 0;
 }
 </style>

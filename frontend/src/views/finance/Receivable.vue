@@ -2,199 +2,135 @@
   <div class="page">
     <h3>应收管理</h3>
     <div class="content">
-      <!-- 顶部导航按钮 -->
-      <div class="toolbar">
-        <button class="btn primary" @click="showDialog = true">+ 新增应收单</button>
-        <button class="btn default" @click="showReceiveDialog = true">收款核销</button>
-      </div>
+      <div class="empty" v-if="!isFinance">仅财务角色可访问应收管理</div>
 
-      <!-- 应收单对话框 -->
-      <div class="dialog-overlay" v-if="showDialog" @click.self="showDialog = false">
-        <div class="dialog">
-          <h4>新增应收单</h4>
-          <div class="form-group">
-            <label>客户名称：</label>
-            <input v-model="newReceivable.customer" placeholder="请输入客户名称" />
-          </div>
-          <div class="form-group">
-            <label>应收金额：</label>
-            <input v-model.number="newReceivable.amount" type="number" placeholder="请输入金额" />
-          </div>
-          <div class="form-group">
-            <label>业务类型：</label>
-            <select v-model="newReceivable.type">
-              <option value="销售商品">销售商品</option>
-              <option value="提供服务">提供服务</option>
-              <option value="其他">其他</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>说明：</label>
-            <textarea v-model="newReceivable.desc" placeholder="请输入说明"></textarea>
-          </div>
-          <div class="dialog-btns">
-            <button class="btn cancel" @click="showDialog = false">取消</button>
-            <button class="btn confirm" @click="submitReceivable">提交</button>
+      <template v-else>
+        <div class="toolbar">
+          <button class="btn primary" @click="openDialog">+ 从销售发票生成应收单</button>
+        </div>
+
+        <!-- 生成应收单对话框 -->
+        <div class="dialog-overlay" v-if="showDialog" @click.self="showDialog = false">
+          <div class="dialog">
+            <h4>从销售发票生成应收单</h4>
+            <div class="form-group">
+              <label>选择发票（用途=销售 且 AI 审查已通过）：</label>
+              <select v-model="generateForm.invoice_id">
+                <option value="">请选择</option>
+                <option v-for="inv in availableInvoices" :key="inv.id" :value="inv.id">
+                  {{ inv.invoice_no }} - {{ inv.buyer || '未知客户' }} - ¥{{ Number(inv.amount).toFixed(2) }}
+                </option>
+              </select>
+            </div>
+            <div class="dialog-btns">
+              <button class="btn cancel" @click="showDialog = false">取消</button>
+              <button class="btn confirm" @click="generateReceivable">生成应收单</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- 收款核销对话框 -->
-      <div class="dialog-overlay" v-if="showReceiveDialog" @click.self="showReceiveDialog = false">
-        <div class="dialog">
-          <h4>收款核销</h4>
-          <div class="form-group">
-            <label>选择应收单：</label>
-            <select v-model="receiveForm.id">
-              <option value="">请选择</option>
-              <option v-for="item in unpaidList" :key="item.id" :value="item.id">
-                {{ item.id }} - {{ item.customer }} - ¥{{ item.amount.toFixed(2) }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>收款金额：</label>
-            <input v-model.number="receiveForm.amount" type="number" placeholder="请输入收款金额" />
-          </div>
-          <div class="form-group">
-            <label>收款方式：</label>
-            <select v-model="receiveForm.method">
-              <option value="银行转账">银行转账</option>
-              <option value="现金">现金</option>
-              <option value="支票">支票</option>
-            </select>
-          </div>
-          <div class="dialog-btns">
-            <button class="btn cancel" @click="showReceiveDialog = false">取消</button>
-            <button class="btn confirm" @click="submitReceive">确认核销</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 应收单列表 -->
-      <table class="table" v-if="financeStore.receivableList.length > 0">
-        <thead>
-          <tr>
-            <th>应收单号</th>
-            <th>客户名称</th>
-            <th>业务类型</th>
-            <th>应收金额</th>
-            <th>已收金额</th>
-            <th>未收金额</th>
-            <th>状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in financeStore.receivableList" :key="item.id">
-            <td>{{ item.id }}</td>
-            <td>{{ item.customer }}</td>
-            <td>{{ item.type }}</td>
-            <td>¥{{ item.amount.toFixed(2) }}</td>
-            <td>¥{{ item.received.toFixed(2) }}</td>
-            <td>¥{{ (item.amount - item.received).toFixed(2) }}</td><!-- tofixed:强制保留小数点后 2 位 -->
-            <td>
-              <span class="status" :class="item.status">
-                {{ statusMap[item.status] }}
-              </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div class="empty" v-else>暂无应收数据</div>
+        <!-- 应收单列表 -->
+        <table class="table" v-if="receivables.length > 0">
+          <thead>
+            <tr>
+              <th>应收单号</th>
+              <th>客户</th>
+              <th>金额</th>
+              <th>关联发票</th>
+              <th>关联凭证</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in receivables" :key="item.id">
+              <td>{{ item.code }}</td>
+              <td>{{ item.customer || '-' }}</td>
+              <td>¥{{ Number(item.amount).toFixed(2) }}</td>
+              <td>#{{ item.invoice_id }}</td>
+              <td>{{ item.voucher_id ? '#' + item.voucher_id : '-' }}</td>
+              <td><span class="status" :class="item.status === '已收款' ? 'st-ok' : 'st-warn'">{{ item.status }}</span></td>
+              <td>
+                <button v-if="item.status === '待收款'" class="btn-sm settle"
+                  @click="settle(item.id)">确认收款</button>
+                <span v-else>-</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="empty" v-else>暂无应收单据，请先在「发票上传」上传销售发票</div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { useFinanceStore } from '../../stores/finance'
+import { ref, computed, onMounted } from 'vue'
+import { request, getUser } from '../../api'
 
+const receivables = ref([])
+const approvedInvoices = ref([])
 const showDialog = ref(false)
-const showReceiveDialog = ref(false)
-const newReceivable = ref({
-  customer: '客户A公司',
-  amount: 10000,
-  type: '销售商品',
-  desc: '销售产品一批'
-})
-const receiveForm = ref({
-  id: '',
-  amount: 0,
-  method: '银行转账'
+const generateForm = ref({ invoice_id: '' })
+
+const isFinance = getUser()?.role === 'finance'
+
+// 可选发票：销售 + 已通过 + 未生成过应收单
+const availableInvoices = computed(() => {
+  const usedIds = new Set(receivables.value.map(r => r.invoice_id))
+  return approvedInvoices.value.filter(
+    inv => inv.kind === '销售' && !usedIds.has(inv.id)
+  )
 })
 
-const financeStore = useFinanceStore()//全局共享状态
-
-const statusMap = {
-  unpaid: '未收款',
-  partial: '部分收款',
-  paid: '已结清'
+const loadAll = async () => {
+  try {
+    const [recs, invoices] = await Promise.all([
+      request('/api/receivables'),
+      request('/api/invoices?status=' + encodeURIComponent('已通过')),
+    ])
+    receivables.value = recs
+    approvedInvoices.value = invoices
+  } catch (e) {
+    alert(e.message)
+  }
 }
 
-//计算属性：未收款应收单列表
-const unpaidList = computed(() => {
-  return financeStore.receivableList.filter(item => item.status !== 'paid')
-})
-
-// 1. 创建并提交【应收单】
-const submitReceivable = () => {
-  // 生成唯一应收单号：YS20240501、YS20240502...
-  const id = 'YS202405' + String(financeStore.receivableList.length + 1).padStart(2, '0')
-  
-  // 把新应收单添加到列表中
-  financeStore.receivableList.push({
-    id,                  // 应收单号
-    customer: newReceivable.value.customer, // 客户名称
-    type: newReceivable.value.type,         // 款项类型
-    amount: newReceivable.value.amount,     // 总应收金额
-    received: 0,         // 已收金额（默认0）
-    desc: newReceivable.value.desc,         // 备注说明
-    status: 'unpaid',     // 状态：未收款
-    date: new Date().toISOString().split('T')[0] // 创建日期
-  })
-  
-  // 关闭弹窗
-  showDialog.value = false
-  // 提示成功
-  alert('应收单创建成功！单号：' + id)
+const openDialog = () => {
+  generateForm.value = { invoice_id: '' }
+  showDialog.value = true
 }
 
-// 2. 提交【收款核销】（给某个应收单收钱）
-const submitReceive = () => {
-  // 如果没选择要收款的应收单 → 提示并退出
-  if (!receiveForm.value.id) {
-    alert('请选择应收单！')
+const generateReceivable = async () => {
+  if (!generateForm.value.invoice_id) {
+    alert('请选择发票！')
     return
   }
-
-  // 根据选中的应收单号，找到对应的应收单数据
-  const item = financeStore.receivableList.find(i => i.id === receiveForm.value.id)
-  
-  // 如果找到了这条应收单
-  if (item) {
-    // 计算：未收金额 = 总金额 - 已收金额
-    const unpaid = item.amount - item.received
-    
-    // 如果填写的收款金额 > 未收金额 → 提示错误，不允许提交
-    if (receiveForm.value.amount > unpaid) {
-      alert('收款金额不能超过未收金额！')
-      return
-    }
-
-    // 把本次收款金额，累加到“已收金额”里
-    item.received += receiveForm.value.amount
-    
-    // 更新状态：
-    // 如果已收 >= 总金额 → 状态为“已结清(paid)”
-    // 否则 → 状态为“部分收款(partial)”
-    item.status = item.received >= item.amount ? 'paid' : 'partial'
-    
-    // 关闭收款弹窗
-    showReceiveDialog.value = false
-    // 提示成功
-    alert('收款核销成功！')
+  try {
+    const created = await request('/api/receivables/generate', {
+      method: 'POST',
+      body: { invoice_id: generateForm.value.invoice_id },
+    })
+    showDialog.value = false
+    alert('应收单生成成功！编号：' + created.code)
+    await loadAll()
+  } catch (e) {
+    alert(e.message)
   }
 }
+
+// 收款：生成凭证（借1122/贷6001）→ 过账 → 标记已收款
+const settle = async (id) => {
+  try {
+    const data = await request(`/api/receivables/${id}/settle`, { method: 'POST' })
+    alert(`凭证 ${data.voucher_code} 已过账，应收单标记已收款！`)
+    await loadAll()
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+onMounted(() => { if (isFinance) loadAll() })
 </script>
 
 <style scoped>
@@ -210,8 +146,6 @@ const submitReceive = () => {
 }
 
 .toolbar {
-  display: flex;
-  gap: 12px;
   margin-bottom: 20px;
 }
 
@@ -227,14 +161,10 @@ const submitReceive = () => {
   color: white;
 }
 
-.btn.default {
-  background: #f5f7fa;
-  color: #333;
-}
-
 .table {
   width: 100%;
   border-collapse: collapse;
+  border: 1px solid #ebeef5;
 }
 
 .table th,
@@ -252,27 +182,27 @@ const submitReceive = () => {
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
+  white-space: nowrap;
 }
 
-.status.unpaid {
-  background: #fdf6ec;
-  color: #e6a23c;
-}
-
-.status.partial {
-  background: #ecf5ff;
-  color: #409eff;
-}
-
-.status.paid {
+.st-ok {
   background: #f0f9eb;
   color: #67c23a;
 }
 
-.empty {
-  text-align: center;
-  padding: 40px 0;
-  color: #909399;
+.st-warn {
+  background: #fdf6ec;
+  color: #e6a23c;
+}
+
+.btn-sm.settle {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  background: #67c23a;
+  color: white;
 }
 
 .dialog-overlay {
@@ -292,7 +222,7 @@ const submitReceive = () => {
   background: white;
   padding: 24px;
   border-radius: 8px;
-  width: 400px;
+  width: 460px;
   max-width: 90%;
 }
 
@@ -310,19 +240,12 @@ const submitReceive = () => {
   color: #666;
 }
 
-.form-group input,
-.form-group select,
-.form-group textarea {
+.form-group select {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid #ddd;
   border-radius: 6px;
   box-sizing: border-box;
-}
-
-.form-group textarea {
-  height: 80px;
-  resize: vertical;
 }
 
 .dialog-btns {
@@ -340,5 +263,11 @@ const submitReceive = () => {
 .btn.confirm {
   background: #409eff;
   color: white;
+}
+
+.empty {
+  text-align: center;
+  padding: 40px 0;
+  color: #909399;
 }
 </style>

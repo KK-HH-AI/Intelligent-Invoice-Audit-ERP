@@ -1,0 +1,28 @@
+# 智能发票审查系统 后端依赖
+# 说明：paddle 系列需要 Python 3.10/3.11 环境（paddleocr 2.x 不支持 3.12）
+
+# Web 框架
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+
+# 鉴权
+PyJWT>=2.8
+bcrypt>=4.1
+
+# 配置与 AI
+python-dotenv>=1.0
+openai>=1.30
+
+# OCR 识别
+paddlepaddle>=2.6
+paddleocr>=2.7
+
+# 附件文本提取
+PyMuPDF>=1.24
+PyPDF2>=3.0
+opencv-python>=4.9
+numpy
+python-docx>=1.1
+pandas>=2.0
+tabulate

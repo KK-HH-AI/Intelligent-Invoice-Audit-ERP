@@ -27,6 +27,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { request, setSession } from '../api'
 
 const router = useRouter()//用于在组件内使用路由跳转
 const form = ref({
@@ -34,26 +35,24 @@ const form = ref({
   password: ''
 })
 
-// 登录逻辑
-const login = () => {
+// 登录逻辑：调后端 /api/auth/login，成功后保存 token 与角色
+const login = async () => {
   const { username, password } = form.value
-  
+
   if (!username || !password) {
     alert('请输入账号和密码')
     return
   }
 
-  const user = localStorage.getItem('erp-user')
-  if (!user) {
-    alert('未注册，请先注册')
-    return
-  }
-
-  const { name, pwd } = JSON.parse(user)
-  if (name === username && pwd === password) {
+  try {
+    const data = await request('/api/auth/login', {
+      method: 'POST',
+      body: { username, password },
+    })
+    setSession(data)
     router.push('/home/receivable')
-  } else {
-    alert('账号或密码错误')
+  } catch (e) {
+    alert(e.message)
   }
 }
 

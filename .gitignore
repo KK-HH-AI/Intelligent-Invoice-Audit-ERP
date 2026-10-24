@@ -85,7 +85,7 @@ coverage/
 *.pb
 *.ckpt
 *.h5
-models/
+ocr_models/
 *.onnx
 
 # 其他敏感文件

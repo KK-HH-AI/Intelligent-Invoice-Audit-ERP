@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { isLoggedIn } from '../api'
 //前端路由守卫相关
 import Login from '../views/Login.vue'
 import Register from '../views/Register.vue'
@@ -8,12 +9,13 @@ import Receivable from '../views/finance/Receivable.vue'
 import Payable from '../views/finance/Payable.vue'
 import Voucher from '../views/finance/Voucher.vue'
 import Ledger from '../views/finance/Ledger.vue'
+import BudgetManage from '../views/finance/BudgetManage.vue'
 import Reimburse from '../views/finance/Reimburse.vue'
 import Report from '../views/finance/Report.vue'
 // 智能审查模块
 import InvoiceOcr from '../views/finance/InvoiceOcr.vue'
-import DocAnalysis from '../views/finance/DocAnalysis.vue'
 import InvoiceAudit from '../views/finance/InvoiceAudit.vue'
+import AuditArchive from '../views/finance/AuditArchive.vue'
 
 const routes = [
   {
@@ -37,11 +39,12 @@ const routes = [
       { path: 'payable', component: Payable },
       { path: 'voucher', component: Voucher },
       { path: 'ledger', component: Ledger },
+      { path: 'budget', component: BudgetManage },
       { path: 'reimburse', component: Reimburse },
       { path: 'report', component: Report },
       { path: 'invoice-ocr', component: InvoiceOcr },
-      { path: 'doc-analysis', component: DocAnalysis },
       { path: 'invoice-audit', component: InvoiceAudit },
+      { path: 'audit-archive', component: AuditArchive },
       { path: '', redirect: 'receivable' }//默认
     ]
   }
@@ -53,10 +56,9 @@ const router = createRouter({
   routes
 })
 
-//真正定义路由守卫规则
+//真正定义路由守卫规则：有 JWT 才能进入需要登录的页面
 router.beforeEach((to, from, next) => {
-  const isLogin = localStorage.getItem('erp-user')
-  if (to.meta.requiresAuth && !isLogin) {
+  if (to.matched.some(record => record.meta.requiresAuth) && !isLoggedIn()) {
     next('/login')
   } else {
     next()

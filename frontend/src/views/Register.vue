@@ -24,22 +24,31 @@
 <script setup>
 import { reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { request } from '../api'
 
 const router = useRouter()
 const form = reactive({ username: '', password: '' })
 
-const register = () => {
+const register = async () => {
   const { username, password } = form
   if (!username || !password) {
     alert('请完善信息')
     return
   }
-  localStorage.setItem(
-    'erp-user',
-    JSON.stringify({ name: username, pwd: password })
-  )//持久化
-  alert('注册成功！请登录')
-  router.push('/login')
+  if (password.length < 6) {
+    alert('密码至少 6 位')
+    return
+  }
+  try {
+    await request('/api/auth/register', {
+      method: 'POST',
+      body: { username, password },
+    })
+    alert('注册成功！请登录')
+    router.push('/login')
+  } catch (e) {
+    alert(e.message)
+  }
 }
 </script>
 

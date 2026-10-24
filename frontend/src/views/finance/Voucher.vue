@@ -2,34 +2,31 @@
   <div class="page">
     <h3>凭证生成</h3>
     <div class="content">
+      <div class="empty" v-if="!isFinance">仅财务角色可访问凭证管理</div>
+
+      <template v-else>
       <div class="toolbar">
-        <button class="btn primary" @click="showDialog = true">+ 从业务单据生成凭证</button>
+        <button class="btn primary" @click="openDialog">+ 从已通过报销单生成凭证</button>
       </div>
 
       <!-- 生成凭证对话框 -->
       <div class="dialog-overlay" v-if="showDialog" @click.self="showDialog = false">
         <div class="dialog">
-          <h4>从业务单据生成凭证</h4>
+          <h4>从已通过的报销单生成凭证</h4>
           <div class="form-group">
-            <label>选择单据类型：</label>
-            <select v-model="generateForm.sourceType">
-              <option value="reimburse">费用报销单</option>
-              <option value="receivable">应收单</option>
-              <option value="payable">应付单</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>选择单据：</label>
-            <select v-model="generateForm.sourceId">
+            <label>选择报销单（已审批通过且未生成过凭证）：</label>
+            <select v-model="generateForm.reimburse_id">
               <option value="">请选择</option>
               <option v-for="item in availableSources" :key="item.id" :value="item.id">
-                {{ item.id }} - {{ item.desc || item.customer || item.supplier }} - ¥{{ item.amount.toFixed(2) }}
+                {{ item.code }} - {{ item.description || item.type }} - ¥{{ Number(item.amount).toFixed(2) }}
               </option>
             </select>
           </div>
           <div class="form-group">
-            <label>凭证日期：</label>
-            <input type="date" v-model="generateForm.date" />
+            <label>分录模板（后端自动生成）：</label>
+            <div class="template-hint">
+              借：6602 管理费用　　贷：1002 银行存款
+            </div>
           </div>
           <div class="dialog-btns">
             <button class="btn cancel" @click="showDialog = false">取消</button>
@@ -39,11 +36,11 @@
       </div>
 
       <!-- 凭证列表 -->
-      <table class="voucher-table" v-if="financeStore.voucherList.length > 0">
+      <table class="voucher-table" v-if="voucherList.length > 0">
         <thead>
           <tr>
             <th>凭证编号</th>
-            <th>凭证日期</th>
+            <th>日期</th>
             <th>摘要</th>
             <th>会计科目</th>
             <th>借方金额</th>
@@ -53,9 +50,9 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in financeStore.voucherList" :key="item.id">
-            <td>{{ item.id }}</td>
-            <td>{{ item.date }}</td>
+          <tr v-for="item in voucherList" :key="item.id">
+            <td>{{ item.code }}</td>
+            <td>{{ (item.created_at || '').slice(0, 10) }}</td>
             <td>{{ item.summary }}</td>
             <td>
               <div v-for="entry in item.entries" :key="entry.account">
@@ -64,147 +61,115 @@
             </td>
             <td>
               <div v-for="entry in item.entries" :key="entry.account">
-                {{ entry.debit > 0 ? '¥' + entry.debit.toFixed(2) : '' }}
+                {{ entry.debit > 0 ? '¥' + Number(entry.debit).toFixed(2) : '' }}
               </div>
             </td>
             <td>
               <div v-for="entry in item.entries" :key="entry.account">
-                {{ entry.credit > 0 ? '¥' + entry.credit.toFixed(2) : '' }}
+                {{ entry.credit > 0 ? '¥' + Number(entry.credit).toFixed(2) : '' }}
               </div>
             </td>
             <td>
-              <span class="status" :class="item.status">
-                {{ statusMap[item.status] }}
-              </span>
+              <span class="status" :class="item.status">{{ statusMap[item.status] }}</span>
             </td>
             <td>
-              <button 
-                v-if="item.status === 'draft'" 
-                class="btn-sm approve"
-                @click="approveVoucher(item.id)"
-              >审核</button>
-              <button 
-                v-if="item.status === 'approved'" 
-                class="btn-sm post"
-                @click="postVoucher(item.id)"
-              >过账</button>
+              <button v-if="item.status === 'draft'" class="btn-sm approve"
+                @click="approveVoucher(item.id)">审核</button>
+              <button v-else-if="item.status === 'approved'" class="btn-sm post"
+                @click="postVoucher(item.id)">过账</button>
               <span v-else>-</span>
             </td>
           </tr>
         </tbody>
       </table>
-      <div class="empty" v-else>暂无凭证数据，请从业务单据生成</div>
+      <div class="empty" v-else>暂无凭证数据，请从已通过的报销单生成</div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { useFinanceStore } from '../../stores/finance'
+import { ref, computed, onMounted } from 'vue'
+import { request, getUser } from '../../api'
 
-const financeStore = useFinanceStore()
+const voucherList = ref([])
+const reimburseList = ref([])
 const showDialog = ref(false)
+const generateForm = ref({ reimburse_id: '' })
 
-// 记录要为哪个数据生成凭证
-const generateForm = ref({
-  sourceType: 'reimburse',
-  sourceId: '',
-  date: new Date().toISOString().split('T')[0]
-})
+const isFinance = getUser()?.role === 'finance'
 
 const statusMap = {
   draft: '草稿',
   approved: '已审核',
-  posted: '已过账'
+  posted: '已过账',
 }
 
-// 根据选择的单据类型，获取对应的可生成凭证的单据
+// 一期仅支持报销单凭证（应收/应付为二期范围）
 const availableSources = computed(() => {
-  const type = generateForm.value.sourceType
-  if (type === 'reimburse') {
-    return financeStore.reimburseList.filter(item => item.status === 'approved')
-  } else if (type === 'receivable') {
-    // 应收单：所有单据都可以生成凭证（代表收入）
-    return financeStore.receivableList
-  } else if (type === 'payable') {
-    // 应付单：所有单据都可以生成凭证（代表支出）
-    return financeStore.payableList
-  }
-  return []
+  const usedIds = new Set(voucherList.value.map(v => v.reimburse_id))
+  return reimburseList.value.filter(
+    item => item.status === '已通过' && !usedIds.has(item.id)
+  )
 })
 
-const generateVoucher = () => {
-  if (!generateForm.value.sourceId) {
-    alert('请选择业务单据！')
+const loadAll = async () => {
+  try {
+    const [vouchers, reimburses] = await Promise.all([
+      request('/api/vouchers'),
+      request('/api/reimburse'),
+    ])
+    voucherList.value = vouchers
+    reimburseList.value = reimburses
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+const openDialog = () => {
+  generateForm.value = { reimburse_id: '' }
+  showDialog.value = true
+}
+
+const generateVoucher = async () => {
+  if (!generateForm.value.reimburse_id) {
+    alert('请选择报销单！')
     return
   }
-  
-  const source = availableSources.value.find(s => s.id === generateForm.value.sourceId)
-  if (!source) return
-
-  //创建唯一的凭证编号
-  const id = 'PZ-2024-' + String(financeStore.voucherList.length + 1).padStart(3, '0')
-  
-  // 生成凭证分录
-  let entries = []
-  let summary = ''
-  
-  if (generateForm.value.sourceType === 'reimburse') {
-    entries = [
-      { account: '6602', accountName: '管理费用', debit: source.amount, credit: 0 },
-      { account: '1002', accountName: '银行存款', debit: 0, credit: source.amount }
-    ]
-    summary = '报销：' + source.desc
-  } else if (generateForm.value.sourceType === 'receivable') {
-    entries = [
-      { account: '1122', accountName: '应收账款', debit: source.amount, credit: 0 },
-      { account: '6001', accountName: '主营业务收入', debit: 0, credit: source.amount }
-    ]
-    summary = '销售：' + source.customer
-  } else if (generateForm.value.sourceType === 'payable') {
-    entries = [
-      { account: '6401', accountName: '主营业务成本', debit: source.amount, credit: 0 },
-      { account: '2202', accountName: '应付账款', debit: 0, credit: source.amount }
-    ]
-    summary = '采购：' + source.supplier
-  }
-
-  financeStore.voucherList.push({
-    id,
-    date: generateForm.value.date,
-    summary,
-    entries,
-    status: 'draft'
-  })
-  
-  showDialog.value = false
-  alert('凭证生成成功！编号：' + id)
-}
-
-const approveVoucher = (id) => {
-  const item = financeStore.voucherList.find(v => v.id === id)
-  if (item) {
-    item.status = 'approved'
-    alert('凭证 ' + id + ' 已审核！')
-  }
-}
-//将凭证信息更新到全局状态ledgerAccounts中
-const postVoucher = (id) => {
-  const item = financeStore.voucherList.find(v => v.id === id)
-  if (item) {
-    item.status = 'posted'
-    // 过账：将凭证分录登记到总账科目中
-    item.entries.forEach(entry => {
-      const account = financeStore.ledgerAccounts.find(a => a.code === entry.account)
-      if (account) {
-        account.debit += entry.debit
-        account.credit += entry.credit
-        account.closing = account.opening + account.debit - account.credit
-      }
+  try {
+    const created = await request('/api/vouchers/generate', {
+      method: 'POST',
+      body: { reimburse_id: generateForm.value.reimburse_id },
     })
-    alert('凭证 ' + id + ' 已过账！可前往总账查看。')
+    showDialog.value = false
+    alert('凭证生成成功！编号：' + created.code)
+    await loadAll()
+  } catch (e) {
+    alert(e.message)
   }
 }
+
+const approveVoucher = async (id) => {
+  try {
+    await request(`/api/vouchers/${id}/approve`, { method: 'POST' })
+    alert('凭证已审核！')
+    await loadAll()
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+const postVoucher = async (id) => {
+  try {
+    await request(`/api/vouchers/${id}/post`, { method: 'POST' })
+    alert('凭证已过账！可前往总账查看。')
+    await loadAll()
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+onMounted(loadAll)
 </script>
 
 <style scoped>
@@ -296,7 +261,7 @@ const postVoucher = (id) => {
   background: white;
   padding: 24px;
   border-radius: 8px;
-  width: 400px;
+  width: 460px;
   max-width: 90%;
 }
 
@@ -314,13 +279,20 @@ const postVoucher = (id) => {
   color: #666;
 }
 
-.form-group input,
 .form-group select {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid #ddd;
   border-radius: 6px;
   box-sizing: border-box;
+}
+
+.template-hint {
+  padding: 10px 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  color: #606266;
+  font-size: 13px;
 }
 
 .dialog-btns {
